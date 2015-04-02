@@ -1,0 +1,85 @@
+#!/usr/bin/env ruby
+
+require 'murmurhash3'
+require 'base32'
+
+def main
+	if $stdin.tty?
+		output_mode
+	else
+		input_mode
+	end
+end
+
+# Read lines of input from stdin, and write those lines out to stdout,
+# prefixed with a suitable hash of the line, SANS NEWLINE
+#
+def input_mode
+	$stdin.each_line do |l|
+		l.chomp!
+		puts "#{hash(l)}\t#{l}"
+	end
+end
+
+# Interactively read lines of input from stdin, and display the current line
+# hash as a prefix on stderr.  When a newline is received, the entered line,
+# sans the hash prefix, is recorded.  ^D or ^C terminates the session, and
+# the entired entered data is written to stdout.
+#
+def output_mode
+	# Yes, I could do this more elegantly, but meh
+	%x{stty -icanon -echo}
+
+	output = ""
+	line = ""
+
+	puts <<-EOF.gsub(/^\t\t/, '')
+		Enter your data below.  The checksum to the left will update with each
+		character you type.  When you're finished the line, verify that the
+		checksum matches the printed copy, then press ENTER to record that line.
+
+		When you are finished, press Ctrl-C or Ctrl-D to end and print the entered
+		data.
+	EOF
+
+	print_rehashed_line(line)
+
+	until $stdin.eof?
+		c = $stdin.read(1)
+		case c
+			when "\n"
+				output += line + "\n"
+				line = ""
+				puts "\n"
+			when "\x7F"
+				line = line[0..-2]
+			when "\x04"
+				raise Interrupt
+			else
+				line += c
+		end
+
+		print_rehashed_line(line)
+	end
+rescue Interrupt
+	# ^C is OK by me
+	exit 0
+ensure
+	%x{stty icanon echo}
+	puts
+	puts
+	puts "Your entered data starts after the break."
+	puts "-----8<-----"
+	puts output
+end
+
+def print_rehashed_line(l)
+	print "\r\e[2K#{hash(l)}\t#{l}"
+end
+
+def hash(l)
+	Base32.encode(MurmurHash3::Native32.murmur3_32_str_digest(l)).gsub(/=*$/, '')
+end
+
+main if __FILE__ == $0
+
